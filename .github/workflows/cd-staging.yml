@@ -1,0 +1,104 @@
+name: CD - Staging (auto after CI)
+
+on:
+  workflow_run:
+    workflows: ["CI - Test & Push (testing)"]   # MUST match your CI workflow name exactly
+    types: [completed]
+  workflow_dispatch: {}                          # manual run button
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+  LOCATION: australiaeast
+
+jobs:
+  staging:
+    if: >
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'testing')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo at triggering commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Derive names
+        id: names
+        shell: bash
+        run: |
+          SHORT_SHA="${IMAGE_TAG:0:7}"
+          echo "RG=rg-stg-$SHORT_SHA"   >> $GITHUB_OUTPUT
+          echo "AKS=aks-stg-$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "NS=stg-$SHORT_SHA"      >> $GITHUB_OUTPUT
+
+      - name: Get ACR info
+        id: acr
+        shell: bash
+        run: |
+          ACR_NAME="${ACR_LOGIN_SERVER%%.*}"
+          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_OUTPUT
+          echo "ACR_ID=$(az acr show -n "$ACR_NAME" --query id -o tsv)" >> $GITHUB_OUTPUT
+
+      - name: Create ephemeral RG + AKS
+        shell: bash
+        run: |
+          az group create -n "${{ steps.names.outputs.RG }}" -l "${{ env.LOCATION }}"
+          az aks create \
+            -g "${{ steps.names.outputs.RG }}" \
+            -n "${{ steps.names.outputs.AKS }}" \
+            -l "${{ env.LOCATION }}" \
+            --node-count 1 \
+            --enable-managed-identity \
+            --attach-acr "${{ steps.acr.outputs.ACR_ID }}" \
+            --generate-ssh-keys
+
+      - name: Get kubeconfig & namespace
+        shell: bash
+        run: |
+          az aks get-credentials -g "${{ steps.names.outputs.RG }}" -n "${{ steps.names.outputs.AKS }}" --overwrite-existing
+          kubectl create namespace "${{ steps.names.outputs.NS }}"
+
+      - name: Render manifests
+        shell: bash
+        run: |
+          export NS="${{ steps.names.outputs.NS }}"
+          export ACR="${{ env.ACR_LOGIN_SERVER }}"
+          export TAG="${{ env.IMAGE_TAG }}"
+          cat > /tmp/staging.yaml <<'YAML'
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: { name: frontend, namespace: ${NS} }
+          spec:
+            replicas: 1
+            selector: { matchLabels: { app: frontend } }
+            template:
+              metadata: { labels: { app: frontend } }
+              spec:
+                containers:
+                - name: frontend
+                  image: ${ACR}/frontend:${TAG}
+                  ports: [{ containerPort: 80 }]
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata: { name: frontend-svc, namespace: ${NS} }
+          spec:
+            selector: { app: frontend }
+            ports: [{ port: 80, targetPort: 80 }]
+            type: ClusterIP
+          YAML
+
+          # Add services if images
