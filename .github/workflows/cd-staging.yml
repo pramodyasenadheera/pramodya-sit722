@@ -1,11 +1,10 @@
 name: CD - Staging (ephemeral namespace on existing AKS)
 
 on:
-  # auto-run right after CI on branch 'testing'
+  # auto-run after CI on branch 'testing'
   workflow_run:
     workflows: ["CI - Test & Push (testing)"]
     types: [completed]
-  # and allow manual runs
   workflow_dispatch: {}
 
 permissions:
@@ -13,12 +12,8 @@ permissions:
   id-token: write
 
 env:
-  # commit that produced the images in CI
   IMAGE_TAG:        ${{ github.event.workflow_run.head_sha || github.sha }}
-  # your ACR login server
   ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
-
-  # use your EXISTING cluster for staging
   STG_RG:           week10d-rg
   STG_AKS:          week10d-aks
   STG_NS_PREFIX:    stg
@@ -30,17 +25,13 @@ jobs:
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'testing')
-
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repo at triggering commit
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Azure login
-        uses: azure/login@v2
+      - uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
@@ -63,7 +54,7 @@ jobs:
           NS="${{ steps.names.outputs.NS }}"
           ACR="${{ env.ACR_LOGIN_SERVER }}"
           TAG="${{ env.IMAGE_TAG }}"
-          cat > /tmp/staging.yaml <<YAML
+          cat > /tmp/staging.yaml <<'YAML'
           apiVersion: apps/v1
           kind: Deployment
           metadata: { name: frontend, namespace: ${NS} }
@@ -152,9 +143,11 @@ jobs:
             ports: [{ port: 8002, targetPort: 8002 }]
             type: ClusterIP
           YAML
+          # substitute variables
+          sed -i "s|\${NS}|$NS|g; s|\${ACR}|$ACR|g; s|\${TAG}|$TAG|g" /tmp/staging.yaml
           cat /tmp/staging.yaml
 
-      - name: Deploy to staging namespace
+      - name: Deploy
         run: kubectl apply -f /tmp/staging.yaml
 
       - name: Wait for rollouts
@@ -165,7 +158,7 @@ jobs:
             kubectl rollout status deployment/$d -n "$NS" --timeout=180s || true
           done
 
-      - name: Acceptance test (curl inside cluster)
+      - name: Acceptance test (in-cluster curl)
         shell: bash
         run: |
           NS="${{ steps.names.outputs.NS }}"
@@ -177,7 +170,6 @@ jobs:
             echo "Acceptance test failed"; exit 1
           fi
 
-      - name: Teardown staging namespace (always)
+      - name: Teardown namespace (always)
         if: always()
-        run: |
-          kubectl delete ns "${{ steps.names.outputs.NS }}" --wait=false || true
+        run: kubectl delete ns "${{ steps.names.outputs.NS }}" --wait=false || true
