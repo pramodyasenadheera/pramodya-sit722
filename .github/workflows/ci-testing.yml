@@ -88,6 +88,12 @@ jobs:
           username: ${{ env.ACR_USERNAME }}
           password: ${{ env.ACR_PASSWORD }}
 
+      - name: Show repo tree (debug)
+        run: |
+          pwd
+          ls -la
+          find . -maxdepth 3 -type d | sort
+
       - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@v6
         with:
