@@ -95,30 +95,41 @@ jobs:
           username: ${{ env.ACR_USERNAME }}
           password: ${{ env.ACR_PASSWORD }}
 
-      - name: Build & push images (auto-detect root or task10_2d)
+            - name: Build & push images (search both roots)
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="."
-          [ -d "./task10_2d" ] && ROOT="./task10_2d"
-          echo "Using ROOT=$ROOT"
+          ROOTS=( "." "./task10_2d" )
+          SERVICES=( "frontend" "backend/customer_service" "backend/order_service" "backend/product_service" )
+          built=0
 
-          # services we expect; we’ll skip any that don’t exist
-          declare -a services=("frontend" "backend/customer_service" "backend/order_service" "backend/product_service")
-
-          for svc in "${services[@]}"; do
-            ctx="$ROOT/$svc"
-            df="$ctx/Dockerfile"
-            name="${svc##*/}"          # repo name (frontend, customer_service, etc.)
-
-            if [ -d "$ctx" ] && [ -f "$df" ]; then
-              echo "==> Building $name from $ctx"
-              docker buildx build \
-                --file "$df" \
-                --tag  "${ACR_LOGIN_SERVER}/${name}:${IMAGE_TAG}" \
-                --tag  "${ACR_LOGIN_SERVER}/${name}:latest" \
-                --push "$ctx"
-            else
-              echo "SKIP: $svc not found (ctx=$ctx, df=$df)."
+          echo "Searching contexts in: ${ROOTS[*]}"
+          for svc in "${SERVICES[@]}"; do
+            found=0
+            for r in "${ROOTS[@]}"; do
+              ctx="$r/$svc"
+              df="$ctx/Dockerfile"
+              if [ -d "$ctx" ] && [ -f "$df" ]; then
+                name="${svc##*/}"
+                echo "==> Building $name from $ctx"
+                docker buildx build \
+                  --file "$df" \
+                  --tag  "${ACR_LOGIN_SERVER}/${name}:${IMAGE_TAG}" \
+                  --tag  "${ACR_LOGIN_SERVER}/${name}:latest" \
+                  --push "$ctx"
+                built=$((built+1))
+                found=1
+                break
+              fi
+            done
+            if [ $found -eq 0 ]; then
+              echo "SKIP: $svc not found under any root."
             fi
           done
+
+          if [ $built -eq 0 ]; then
+            echo "ERROR: No images were built. Check your folder layout or Dockerfiles."
+            exit 1
+          fi
+
+          echo "Built & pushed $built image(s)."
