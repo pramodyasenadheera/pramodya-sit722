@@ -62,19 +62,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: frontend
-            context: ./frontend
-            dockerfile: ./frontend/Dockerfile
-          - name: customer-service
-            context: ./backend/customer_service
-            dockerfile: ./backend/customer_service/Dockerfile
-          - name: order-service
-            context: ./backend/order_service
-            dockerfile: ./backend/order_service/Dockerfile
-          - name: product-service
-            context: ./backend/product_service
-            dockerfile: ./backend/product_service/Dockerfile
-
+          - name: "frontend"
+            context:  ./task10_2d/frontend
+            file: ./task10_2d/frontend/Dockerfile
+          - name: "customer-service"
+            context: ./task10_2d/backend/customer_service
+            file: ./task10_2d/backend/customer_service/Dockerfile
+          - name: "order-service"
+            context: ./task10_2d/backend/order_service
+            file: ./task10_2d/backend/order_service/Dockerfile
+          - name: "product-service"
+            context: ./task10_2d/backend/product_service
+            file: ./task10_2d/backend/product_service/Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -93,7 +92,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
+          file: ${{ matrix.file }}
           push: true
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/${{ matrix.name }}:${{ env.IMAGE_TAG }}
