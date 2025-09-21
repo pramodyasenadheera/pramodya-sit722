@@ -63,17 +63,17 @@ jobs:
       matrix:
         include:
           - name: "frontend"
-            context:  ./task10_2d/frontend
-            file: ./task10_2d/frontend/Dockerfile
+            context: ./frontend
+            file: ./frontend/Dockerfile
           - name: "customer-service"
-            context: ./task10_2d/backend/customer_service
-            file: ./task10_2d/backend/customer_service/Dockerfile
+            context: ./backend/customer_service
+            file: ./backend/customer_service/Dockerfile
           - name: "order-service"
-            context: ./task10_2d/backend/order_service
-            file: ./task10_2d/backend/order_service/Dockerfile
+            context: ./backend/order_service
+            file: ./backend/order_service/Dockerfile
           - name: "product-service"
-            context: ./task10_2d/backend/product_service
-            file: ./task10_2d/backend/product_service/Dockerfile
+            context: ./backend/product_service
+            file: ./backend/product_service/Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -91,6 +91,7 @@ jobs:
       - name: Show repo tree (debug)
         run: |
           pwd
+          git rev-parse --abbrev-ref HEAD
           ls -la
           find . -maxdepth 3 -type d | sort
 
